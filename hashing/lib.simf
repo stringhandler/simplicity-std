@@ -1,8 +1,0 @@
-
-pub fn init() -> Ctx8 {
-    jet::sha_256_ctx_8_init();
-}
-
-pub fn hash_32(c: Ctx8, d: u32) -> Ctx8{
-    jet::sha_256_ctx_8_add_32(ctx,
-}

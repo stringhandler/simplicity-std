@@ -285,37 +285,6 @@ genTypesModule :: [(String, Ty)] -> String
 genTypesModule types = unlines autoGenHeader ++ intercalate "\n" (map (uncurry genDomainEq) types)
 
 -- ---------------------------------------------------------------------------
--- Library outputs
--- ---------------------------------------------------------------------------
-
--- | mcpp distribution: a single flat file users can #include.
-genMcppLib :: [TypeConfig] -> String
-genMcppLib tcs = unlines $
-  autoGenHeader ++
-  [ "// mcpp distribution: include this single file with the C preprocessor."
-  , "// Example:  #include \"std/mcpp/math.simf\""
-  , ""
-  , "#ifndef SIMP_STD_MATH_SIMF"
-  , "#define SIMP_STD_MATH_SIMF"
-  , ""
-  ] ++
-  lines (concatMap genTypeModule tcs) ++
-  [ ""
-  , "#endif // SIMP_STD_MATH_SIMF"
-  ]
-
--- | Native import distribution stub (TODO).
-genNativeLibStub :: [TypeConfig] -> String
-genNativeLibStub tcs = unlines $
-  autoGenHeader ++
-  [ "// TODO: native SimplicityHL import distribution."
-  , "// This file will re-export all types once the native module/import"
-  , "// system is finalised in the SimplicityHL compiler."
-  , ""
-  ] ++
-  map (\tc -> "// use " ++ tn (tcBits tc) ++ ";") tcs
-
--- ---------------------------------------------------------------------------
 -- IO helpers
 -- ---------------------------------------------------------------------------
 
@@ -331,19 +300,11 @@ emit path content = do
 main :: IO ()
 main = do
   createDirectoryIfMissing True "std/src"
-  createDirectoryIfMissing True "std/mcpp"
-  createDirectoryIfMissing True "std/native"
 
   putStrLn "Generating per-type source modules..."
   mapM_ (\tc -> emit ("std/src/" ++ tn (tcBits tc) ++ ".simf") (genTypeModule tc)) allTypes
 
   putStrLn "Generating domain type eq functions..."
   emit "std/src/types.simf" (genTypesModule domainTypes)
-
-  putStrLn "Generating mcpp distribution..."
-  emit "std/mcpp/math.simf" (genMcppLib allTypes)
-
-  putStrLn "Generating native distribution stub..."
-  emit "std/native/math.simf" (genNativeLibStub allTypes)
 
   putStrLn "\nDone."
