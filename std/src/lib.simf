@@ -1,0 +1,13 @@
+
+fn not(bit: bool) -> bool {
+    <u1>::into(jet::complement_1(<bool>::into(bit)))
+}
+
+
+fn or(a: bool, b: bool) -> bool {
+   <u1>::into(jet::or_1(<bool>::into(a), <bool>::into(b)))
+}
+
+fn assert_zero(b: bool) {
+    assert!(not(b));
+}
