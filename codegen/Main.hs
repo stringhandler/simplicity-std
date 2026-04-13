@@ -2,31 +2,31 @@
 -- Run via: runghc codegen/Main.hs  (or via generate.ps1)
 module Main where
 
-import Data.List (intercalate)
-import System.Directory (createDirectoryIfMissing)
+import Data.List (intercalate, isPrefixOf)
+import Control.Exception (catch, SomeException)
+import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeFile)
 
 -- ---------------------------------------------------------------------------
 -- Configuration: integer width types
 -- ---------------------------------------------------------------------------
 
--- | Each integer width and which 2x-wide jets are available.
---   tcHasMul:   jet::multiply_N exists (requires u(2N) result type)
---   tcHasEqJet: jet::eq_(2N) exists (used for zero-extension equality trick)
+-- | Integer width configuration.
+--   tcHasArith: add/subtract/multiply jets exist (u8–u64 only)
+--   tcHasMul:   multiply jet exists (requires u(2N) result type)
 data TypeConfig = TypeConfig
-  { tcBits      :: Int
-  , tcHasMul    :: Bool
-  , tcHasEqJet  :: Bool
+  { tcBits     :: Int
+  , tcHasArith :: Bool
+  , tcHasMul   :: Bool
   }
 
 allTypes :: [TypeConfig]
 allTypes =
-  [ TypeConfig 4   True  True
-  , TypeConfig 8   True  True
+  [ TypeConfig 8   True  True
   , TypeConfig 16  True  True
   , TypeConfig 32  True  True
   , TypeConfig 64  True  True
-  , TypeConfig 128 False True   -- no u256 multiply jet; jet::eq_256 exists
-  , TypeConfig 256 False False  -- no u512 for multiply or eq
+  , TypeConfig 128 False False  -- no arithmetic jets above u64
+  , TypeConfig 256 False False
   ]
 
 -- ---------------------------------------------------------------------------
@@ -57,41 +57,37 @@ block = unlines
 
 genAdd :: Int -> String
 genAdd n = block
-  [ "fn safe_add_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
-  , "    unwrap(checked_add_" ++ ws n ++ "(a, b))"
+  [ "fn checked_add_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> Option<" ++ tn n ++ "> {"
+  , "    let (carry, sum): (bool, " ++ tn n ++ ") = jet::add_" ++ ws n ++ "(a, b);"
+  , "    match carry {"
+  , "        true => None,"
+  , "        false => Some(sum),"
+  , "    }"
   , "}"
   , ""
-  , "fn checked_add_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> Option<" ++ tn n ++ "> {"
-  , "    let (carry, sum): (bool, " ++ tn n ++ ") = jet::add_" ++ ws n ++ "(a, b);"
-  , "    match jet::eq_1(carry, 1) {"
-  , "        true => Some(sum),"
-  , "        false => None,"
-  , "    }"
+  , "fn safe_add_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
+  , "    unwrap(checked_add_" ++ ws n ++ "(a, b))"
   , "}"
   ]
 
 genSub :: Int -> String
 genSub n = block
-  [ "fn safe_sub_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
-  , "    unwrap(checked_sub_" ++ ws n ++ "(a, b))"
-  , "}"
-  , ""
-  , "fn checked_sub_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> Option<" ++ tn n ++ "> {"
+  [ "fn checked_subtract_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> Option<" ++ tn n ++ "> {"
   , "    let (borrow, diff): (bool, " ++ tn n ++ ") = jet::subtract_" ++ ws n ++ "(a, b);"
-  , "    match jet::eq_1(borrow) {"
+  , "    match borrow {"
   , "        true => None,"
   , "        false => Some(diff),"
   , "    }"
+  , "}"
+  , ""
+  , "fn safe_subtract_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
+  , "    unwrap(checked_subtract_" ++ ws n ++ "(a, b))"
   , "}"
   ]
 
 genMul :: Int -> String
 genMul n = block
-  [ "fn safe_multiply_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
-  , "    unwrap(checked_multiply_" ++ ws n ++ "(a, b))"
-  , "}"
-  , ""
-  , "fn checked_multiply_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> Option<" ++ tn n ++ "> {"
+  [ "fn checked_multiply_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> Option<" ++ tn n ++ "> {"
   , "    let result: " ++ tn (n * 2) ++ " = jet::multiply_" ++ ws n ++ "(a, b);"
   , "    let (high, low): (" ++ tn n ++ ", " ++ tn n ++ ") = <" ++ tn (n * 2) ++ ">::into(result);"
   , "    match jet::is_zero_" ++ ws n ++ "(high) {"
@@ -99,39 +95,73 @@ genMul n = block
   , "        false => None,"
   , "    }"
   , "}"
+  , ""
+  , "fn safe_multiply_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
+  , "    unwrap(checked_multiply_" ++ ws n ++ "(a, b))"
+  , "}"
   ]
 
 genSatAdd :: Int -> String
 genSatAdd n = block
   [ "fn saturating_add_" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") -> " ++ tn n ++ " {"
   , "    let (carry, sum): (bool, " ++ tn n ++ ") = jet::add_" ++ ws n ++ "(a, b);"
-  , "    match jet::eq_1(carry, 1) {"
-  , "        true => sum,"
-  , "        false => 0x" ++ replicate (n `div` 4) 'f' ++ ","
+  , "    match carry {"
+  , "        true => 0x" ++ replicate (n `div` 4) 'f' ++ ","
+  , "        false => sum,"
   , "    }"
   , "}"
   ]
 
 genEq :: TypeConfig -> String
 genEq tc
-  | tcHasEqJet tc = block
+  -- u8–u64: subtract then check if diff is zero
+  | tcHasArith tc = block
       [ "fn eq_" ++ ws n ++ "(val1: " ++ tn n ++ ", val2: " ++ tn n ++ ") -> bool {"
-      , "    jet::eq_" ++ ws (n * 2) ++ "(<(" ++ tn n ++ ", " ++ tn n ++ ")>::into((0, val1)), <(" ++ tn n ++ ", " ++ tn n ++ ")>::into((0, val2)))"
+      , "    let (borrow, diff): (bool, " ++ tn n ++ ") = jet::subtract_" ++ ws n ++ "(val1, val2);"
+      , "    match borrow {"
+      , "        true => false,"
+      , "        false => jet::is_zero_" ++ ws n ++ "(diff),"
+      , "    }"
       , "}"
       ]
+  -- u128: zero-extend into u256 and use jet::eq_256
+  | n == 128 = block
+      [ "fn eq_" ++ ws n ++ "(val1: " ++ tn n ++ ", val2: " ++ tn n ++ ") -> bool {"
+      , "    jet::eq_256(<(u128, u128)>::into((0, val1)), <(u128, u128)>::into((0, val2)))"
+      , "}"
+      ]
+  -- u256: decompose into u128 halves and compare each with eq_128
   | otherwise = block
       [ "fn eq_" ++ ws n ++ "(val1: " ++ tn n ++ ", val2: " ++ tn n ++ ") -> bool {"
-      , "    let (a_hi, a_lo): (" ++ tn h ++ ", " ++ tn h ++ ") = <" ++ tn n ++ ">::into(val1);"
-      , "    let (b_hi, b_lo): (" ++ tn h ++ ", " ++ tn h ++ ") = <" ++ tn n ++ ">::into(val2);"
-      , "    match eq_" ++ ws h ++ "(a_hi, b_hi) {"
-      , "        true => eq_" ++ ws h ++ "(a_lo, b_lo),"
+      , "    let (a_hi, a_lo): (u128, u128) = <u256>::into(val1);"
+      , "    let (b_hi, b_lo): (u128, u128) = <u256>::into(val2);"
+      , "    match eq_128(a_hi, b_hi) {"
+      , "        true => eq_128(a_lo, b_lo),"
       , "        false => false,"
       , "    }"
       , "}"
       ]
-  where
-    n = tcBits tc
-    h = n `div` 2
+  where n = tcBits tc
+
+genAssertEq :: Int -> String
+genAssertEq n = block
+  [ "fn assert_eq" ++ ws n ++ "(a: " ++ tn n ++ ", b: " ++ tn n ++ ") {"
+  , "    assert!(eq_" ++ ws n ++ "(a, b));"
+  , "}"
+  ]
+
+genAssertNone :: Int -> String
+genAssertNone n = block
+  [ "fn assert_none" ++ ws n ++ "(val: Option<" ++ tn n ++ ">) {"
+  , "    assert!(is_none::<" ++ tn n ++ ">(val));"
+  , "}"
+  ]
+
+genAssertModule :: [TypeConfig] -> String
+genAssertModule tcs = unlines autoGenHeader
+  ++ intercalate "\n" (map (genAssertEq . tcBits) tcs)
+  ++ "\n"
+  ++ intercalate "\n" (map (genAssertNone . tcBits) tcs)
 
 -- ---------------------------------------------------------------------------
 -- Per-type module
@@ -141,7 +171,7 @@ genTypeModule :: TypeConfig -> String
 genTypeModule tc = unlines autoGenHeader ++ body
   where
     n    = tcBits tc
-    ops  = [genAdd n, genSub n] ++ [genMul n | tcHasMul tc] ++ [genSatAdd n, genEq tc]
+    ops  = (if tcHasArith tc then [genAdd n, genSub n] ++ [genMul n | tcHasMul tc] ++ [genSatAdd n] else []) ++ [genEq tc]
     body = intercalate "\n" ops
 
 -- ---------------------------------------------------------------------------
@@ -200,10 +230,15 @@ eqExpr (TPair t1 t2) a b =
      "            }\n" ++
      "        }"
 eqExpr (TEither t1 t2) a b =
-  "match (" ++ a ++ ", " ++ b ++ ") {\n" ++
-  "            (Left(" ++ a ++ "_i), Left(" ++ b ++ "_i)) => " ++ eqExpr t1 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
-  "            (Right(" ++ a ++ "_i), Right(" ++ b ++ "_i)) => " ++ eqExpr t2 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
-  "            _ => false,\n" ++
+  "match " ++ a ++ " {\n" ++
+  "            Left(" ++ a ++ "_i: " ++ tyStr t1 ++ ") => match " ++ b ++ " {\n" ++
+  "                Left(" ++ b ++ "_i: " ++ tyStr t1 ++ ") => " ++ eqExpr t1 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
+  "                Right(_: " ++ tyStr t2 ++ ") => false,\n" ++
+  "            },\n" ++
+  "            Right(" ++ a ++ "_i: " ++ tyStr t2 ++ ") => match " ++ b ++ " {\n" ++
+  "                Right(" ++ b ++ "_i: " ++ tyStr t2 ++ ") => " ++ eqExpr t2 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
+  "                Left(_: " ++ tyStr t1 ++ ") => false,\n" ++
+  "            },\n" ++
   "        }"
 
 -- | Equality body for the top level of a function (4-space indent).
@@ -232,10 +267,15 @@ eqBody (TPair t1 t2) a b =
      "        false => false,\n" ++
      "    }"
 eqBody (TEither t1 t2) a b =
-  "match (" ++ a ++ ", " ++ b ++ ") {\n" ++
-  "        (Left(" ++ a ++ "_i), Left(" ++ b ++ "_i)) => " ++ eqExpr t1 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
-  "        (Right(" ++ a ++ "_i), Right(" ++ b ++ "_i)) => " ++ eqExpr t2 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
-  "        _ => false,\n" ++
+  "match " ++ a ++ " {\n" ++
+  "        Left(" ++ a ++ "_i: " ++ tyStr t1 ++ ") => match " ++ b ++ " {\n" ++
+  "            Left(" ++ b ++ "_i: " ++ tyStr t1 ++ ") => " ++ eqExpr t1 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
+  "            Right(_: " ++ tyStr t2 ++ ") => false,\n" ++
+  "        },\n" ++
+  "        Right(" ++ a ++ "_i: " ++ tyStr t2 ++ ") => match " ++ b ++ " {\n" ++
+  "            Right(" ++ b ++ "_i: " ++ tyStr t2 ++ ") => " ++ eqExpr t2 (a ++ "_i") (b ++ "_i") ++ ",\n" ++
+  "            Left(_: " ++ tyStr t1 ++ ") => false,\n" ++
+  "        },\n" ++
   "    }"
 
 genDomainEq :: String -> Ty -> String
@@ -247,10 +287,13 @@ genDomainEq name ty = block $
       , "}"
       ]
     else
-      [ "fn eq_" ++ name ++ "(a: " ++ name ++ ", b: " ++ name ++ ") -> bool {"
-      , "    " ++ eqBody ty "a" "b"
-      , "}"
-      ]
+      let rawTy = tyStr ty
+      in [ "fn eq_" ++ name ++ "(a: " ++ name ++ ", b: " ++ name ++ ") -> bool {"
+         , "    let a_i: " ++ rawTy ++ " = <" ++ rawTy ++ ">::into(a);"
+         , "    let b_i: " ++ rawTy ++ " = <" ++ rawTy ++ ">::into(b);"
+         , "    " ++ eqBody ty "a_i" "b_i"
+         , "}"
+         ]
 
 -- | Ordered so dependencies come before dependents.
 domainTypes :: [(String, Ty)]
@@ -266,7 +309,7 @@ domainTypes =
   , ("TokenAmount1",  TEither (TRef "Point") (TU 64))
   , ("Distance",      TU 16)
   , ("Duration",      TU 16)
-  , ("ExplicitAmount",TU 256)
+  , ("ExplicitAmount",TU 64)
   , ("ExplicitAsset", TU 256)
   , ("ExplicitNonce", TU 256)
   , ("Fe",            TU 256)
@@ -281,8 +324,27 @@ domainTypes =
   , ("Ctx8",          TPair (TList (TU 8) 64) (TPair (TU 64) (TU 256)))
   ]
 
+genDomainAssertEq :: String -> Ty -> String
+genDomainAssertEq name _ = block
+  [ "fn assert_eq_" ++ name ++ "(a: " ++ name ++ ", b: " ++ name ++ ") {"
+  , "    assert!(eq_" ++ name ++ "(a, b));"
+  , "}"
+  ]
+
+genDomainAssertNone :: String -> Ty -> String
+genDomainAssertNone name _ = block
+  [ "fn assert_none_" ++ name ++ "(val: Option<" ++ name ++ ">) {"
+  , "    assert!(is_none::<" ++ name ++ ">(val));"
+  , "}"
+  ]
+
 genTypesModule :: [(String, Ty)] -> String
-genTypesModule types = unlines autoGenHeader ++ intercalate "\n" (map (uncurry genDomainEq) types)
+genTypesModule types = unlines autoGenHeader
+  ++ intercalate "\n" (map (uncurry genDomainEq) types)
+  ++ "\n"
+  ++ intercalate "\n" (map (uncurry genDomainAssertEq) types)
+  ++ "\n"
+  ++ intercalate "\n" (map (uncurry genDomainAssertNone) types)
 
 -- ---------------------------------------------------------------------------
 -- IO helpers
@@ -297,12 +359,29 @@ emit path content = do
 -- Main
 -- ---------------------------------------------------------------------------
 
+-- | Remove stale uN.simf files for widths no longer in allTypes.
+cleanStaleSrc :: IO ()
+cleanStaleSrc = do
+  let activeFiles = map (\tc -> tn (tcBits tc) ++ ".simf") allTypes
+  existing <- listDirectory "std/src"
+  let stale = filter (\f -> "u" `isPrefixOf` f && f `notElem` activeFiles) existing
+  mapM_ (\f -> do
+    let path = "std/src/" ++ f
+    removeFile path `catch` (\(_ :: SomeException) -> return ())
+    putStrLn $ "  removed stale " ++ path) stale
+
 main :: IO ()
 main = do
   createDirectoryIfMissing True "std/src"
 
+  putStrLn "Cleaning stale source files..."
+  cleanStaleSrc
+
   putStrLn "Generating per-type source modules..."
   mapM_ (\tc -> emit ("std/src/" ++ tn (tcBits tc) ++ ".simf") (genTypeModule tc)) allTypes
+
+  putStrLn "Generating assert functions..."
+  emit "std/src/assert.simf" (genAssertModule allTypes)
 
   putStrLn "Generating domain type eq functions..."
   emit "std/src/types.simf" (genTypesModule domainTypes)

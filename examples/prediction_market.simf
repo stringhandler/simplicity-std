@@ -5,6 +5,9 @@
 // Type aliases
 // ============================================================================
 
+
+#include "../dist/mcpp/std.simf.inc"
+
 // 17-way PATH dispatch tree
 type Path1or2 = Either<(), ()>;
 type Path3or4 = Either<(), ()>;
@@ -215,8 +218,8 @@ fn verify_oracle_signature(outcome_yes: bool, signature: Signature) {
 }
 
 fn collateral_for_pairs(pairs: u64) -> u64 {
-    let two_cpt: u64 = safe_multiply(2, param::COLLATERAL_PER_TOKEN);
-    safe_multiply(pairs, two_cpt)
+    let two_cpt: u64 = safe_multiply_64(2, param::COLLATERAL_PER_TOKEN);
+    safe_multiply_64(pairs, two_cpt)
 }
 
 fn get_issuance_amount(index: u32) -> u64 {
@@ -291,7 +294,7 @@ fn subsequent_issuance_primary_path(slot: u8, yes_bf: BlindingQuad, no_bf: Blind
 
     let (coll_asset, old_collateral): (u256, u64) = get_input_explicit_asset_amount(2);
     assert!(jet::eq_256(coll_asset, param::COLLATERAL_ASSET_ID));
-    let total_collateral: u64 = safe_add(old_collateral, new_collateral);
+    let total_collateral: u64 = safe_add_64(old_collateral, new_collateral);
 
     verify_output_reissuance_token(0, param::YES_REISSUANCE_TOKEN, yes_out_abf, yes_out_vbf);
     ensure_output_script_hash_eq(0, unresolved_yes_rt_script_hash());
@@ -400,7 +403,7 @@ fn post_resolution_redemption_path(slot: u8, tokens_burned: u64) {
     assert!(jet::eq_256(coll_asset, param::COLLATERAL_ASSET_ID));
 
     let payout: u64 = collateral_for_pairs(tokens_burned);
-    let remaining: u64 = safe_subtract(coll_amount, payout);
+    let remaining: u64 = safe_subtract_64(coll_amount, payout);
 
     let num_outputs: u32 = jet::num_outputs();
     let is_partial: bool = not(jet::is_zero_64(remaining));
@@ -483,8 +486,8 @@ fn expiry_redemption_path(slot: u8, tokens_burned: u64, burn_asset: u256) {
     let is_no: bool = jet::eq_256(burn_asset, param::NO_TOKEN_ASSET);
     assert!(or(is_yes, is_no));
 
-    let payout: u64 = safe_multiply(tokens_burned, param::COLLATERAL_PER_TOKEN);
-    let remaining: u64 = safe_subtract(coll_amount, payout);
+    let payout: u64 = safe_multiply_64(tokens_burned, param::COLLATERAL_PER_TOKEN);
+    let remaining: u64 = safe_subtract_64(coll_amount, payout);
 
     let num_outputs: u32 = jet::num_outputs();
     let is_partial: bool = not(jet::is_zero_64(remaining));
@@ -517,7 +520,7 @@ fn cancellation_partial_path(slot: u8, pairs_burned: u64) {
     assert!(jet::eq_256(coll_asset, param::COLLATERAL_ASSET_ID));
 
     let refund: u64 = collateral_for_pairs(pairs_burned);
-    let remaining: u64 = safe_subtract(coll_amount, refund);
+    let remaining: u64 = safe_subtract_64(coll_amount, refund);
     assert!(not(jet::is_zero_64(remaining)));
 
     ensure_output_asset_with_amount_eq(0, param::COLLATERAL_ASSET_ID, remaining);

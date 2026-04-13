@@ -37,7 +37,7 @@ Running `./build.ps1` produces two ready-to-use single-file bundles from the sou
 
 | Path | Description |
 |------|-------------|
-| `dist/mcpp/std.simf` | All sources concatenated with `#ifndef` include guards — drop this into any project using the C preprocessor |
+| `dist/mcpp/std.simf.inc` | All sources concatenated with `#ifndef` include guards — drop this into any project using the C preprocessor |
 | `dist/lib/std.simf` | Same content, but every function is `pub fn` — intended for use as a library dependency |
 
 ---

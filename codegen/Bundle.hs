@@ -19,7 +19,7 @@ mcppHeader = unlines
   , "// Run build.ps1 to regenerate."
   , ""
   , "// mcpp distribution: include this single file with the C preprocessor."
-  , "// Example:  #include \"dist/mcpp/std.simf\""
+  , "// Example:  #include \"dist/mcpp/std.simf.inc\""
   , ""
   , "#ifndef SIMP_STD_SIMF"
   , "#define SIMP_STD_SIMF"
@@ -68,8 +68,8 @@ main = do
   chunks <- mapM readSrc simfFiles
   let body = concat chunks
 
-  writeFile "dist/mcpp/std.simf" (mcppHeader ++ body ++ mcppFooter)
-  putStrLn $ "  wrote dist/mcpp/std.simf"
+  writeFile "dist/mcpp/std.simf.inc" (mcppHeader ++ body ++ mcppFooter)
+  putStrLn $ "  wrote dist/mcpp/std.simf.inc"
 
   writeFile "dist/lib/std.simf" (libHeader ++ addPub body)
   putStrLn $ "  wrote dist/lib/std.simf"

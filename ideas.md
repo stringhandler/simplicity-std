@@ -9,7 +9,7 @@ Requirements:
 easiest will be if can specify the parameters and compile code. An alternative to this is to remap parameters 
 in the simplicity base64, but this too will require the ability to decode simplicity and if a param has been repeated or has the same value, it will not be reliable to change the const's in place.
 2. Mildly related, but the user should also be able to specify the JetEnviroment through libcompilation.
-3. 
+3. It is vitally important to link to specific versions of libraries, because a change in code will change the generated simplicity. This could render utxos unspendable if you cannot regenerate the simplicity program on the utxo.
 
 Systems looked at:
 1. rust/cargo
